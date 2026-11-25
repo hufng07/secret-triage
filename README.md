@@ -4,9 +4,6 @@ A small Python tool to triage suspected secrets found during GitHub recon.
 It scores each string and labels it as a likely false positive, needs review, or suspicious.
 
 ## How it works
-
-## How it works
-
 1. **Placeholder filter**: drops values containing words like `example`, `your`, `invalid`, `test`.
 2. **Key-type detection**: recognizes known formats by prefix (GitHub PAT, AWS access key ID,
    Stripe secret/publishable keys, Google API key) and rates them as secret, review, or public by design.
