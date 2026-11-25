@@ -14,8 +14,14 @@ It scores each string and labels it as a likely false positive, needs review, or
 ## Usage
 
 ```bash
-python3 triage.py
+python3 triage.py "string1" "string2"   # score strings directly
+python3 triage.py -f path/to/.env        # score each line of a file
+cat .env | python3 triage.py             # read from a pipe
+python3 triage.py --demo                 # run with built-in fake samples
+python3 triage.py --help
 ```
+
+Lines starting with `#` are skipped. For `KEY=value` lines, only the value is scored.
 
 ## Example output
 
@@ -29,6 +35,7 @@ python3 triage.py
 
 - Placeholder matching uses substrings, so `here` also matches `where` and `test` matches `latest`.
 - Entropy alone cannot separate long placeholders from short real keys.
+- Credentials embedded in URLs (`scheme://user:pass@host`) are not parsed yet.
 
 ## Ethics
 
