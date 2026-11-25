@@ -5,9 +5,12 @@ It scores each string and labels it as a likely false positive, needs review, or
 
 ## How it works
 
+## How it works
+
 1. **Placeholder filter**: drops values containing words like `example`, `your`, `invalid`, `test`.
-2. **Length check**: only strings of 20+ characters can be marked suspicious.
-3. **Shannon entropy** with charset-aware thresholds:
+2. **Key-type detection**: recognizes known formats by prefix (GitHub PAT, AWS access key ID,
+   Stripe secret/publishable keys, Google API key) and rates them as secret, review, or public by design.
+3. **Shannon entropy** for unknown formats, with charset-aware thresholds:
    - hex strings (max entropy 4.0): threshold 3.0
    - mixed alphanumeric: threshold 4.5
 
