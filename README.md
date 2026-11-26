@@ -19,6 +19,8 @@ python3 triage.py -f path/to/.env        # score each line of a file
 cat .env | python3 triage.py             # read from a pipe
 python3 triage.py --demo                 # run with built-in fake samples
 python3 triage.py --help
+python3 triage.py --gitleaks report.json            # score a gitleaks JSON report (secrets masked)
+python3 triage.py --gitleaks report.json --unmask   # same, with full secrets
 ```
 
 Lines starting with `#` are skipped. For `KEY=value` lines, only the value is scored.

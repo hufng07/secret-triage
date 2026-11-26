@@ -1,4 +1,5 @@
 import argparse
+import json
 import math
 import random
 import re
@@ -100,6 +101,33 @@ def demo_samples() -> list:
         fake("AI" + "za", 35),
     ]
 
+def mask(s: str) -> str:
+    """Che secret: chỉ hiện 6 ký tự đầu và độ dài."""
+    if len(s) <= 6:
+        return "*" * len(s)
+    return f"{s[:6]}… ({len(s)} chars)"
+
+
+def report_gitleaks(path: str, unmask: bool = False) -> None:
+    """Đọc báo cáo JSON của gitleaks, chấm điểm và in theo mức độ."""
+    with open(path, encoding="utf-8") as fh:
+        findings = json.load(fh)
+
+    rows = []
+    for f in findings:
+        secret = f.get("Secret", "")
+        label = classify(secret)
+        where = f"{f.get('File', '?')}:{f.get('StartLine', '?')}"
+        commit = f.get("Commit", "")[:7]
+        rows.append((label, where, commit, secret))
+
+    order = {"🔴": 0, "🟡": 1, "🟢": 2}
+    rows.sort(key=lambda r: order.get(r[0][0], 3))   # 🔴 lên đầu
+
+    print(f"{len(rows)} findings from gitleaks\n")
+    for label, where, commit, secret in rows:
+        shown = secret if unmask else mask(secret)
+        print(f"{label:<50} {where:<10} {commit:<8} {shown}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -108,7 +136,12 @@ def main():
     parser.add_argument("strings", nargs="*", help="one or more strings to score")
     parser.add_argument("-f", "--file", help="read and score each line of a file (e.g. .env)")
     parser.add_argument("--demo", action="store_true", help="run with built-in fake samples")
+    parser.add_argument("--gitleaks", metavar="REPORT", help="score findings from a gitleaks JSON report")
+    parser.add_argument("--unmask", action="store_true", help="show full secrets (masked by default)")
     args = parser.parse_args()
+    if args.gitleaks:
+        report_gitleaks(args.gitleaks, args.unmask)
+        return
 
     if args.demo:
         lines = demo_samples()
