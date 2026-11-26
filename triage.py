@@ -16,12 +16,12 @@ PLACEHOLDER_WORDS = [
 
 # (tên loại key, regex, mức độ): secret / review / public
 KEY_PATTERNS = [
-    ("GitHub personal access token", r"^ghp_[A-Za-z0-9]{36}$", "secret"),
+    ("GitHub personal access token", r"^(ghp_)[A-Za-z0-9]{36}$", "secret"),
     ("AWS access key ID", r"^(AKIA|ASIA)[A-Z0-9]{16}$", "secret"),
-    ("Stripe secret key (live)", r"^sk_live_[A-Za-z0-9]{24,}$", "secret"),
-    ("Stripe secret key (test)", r"^sk_test_[A-Za-z0-9]{24,}$", "review"),
-    ("Stripe publishable key", r"^pk_(live|test)_[A-Za-z0-9]{24,}$", "public"),
-    ("Google API key", r"^AIza[0-9A-Za-z_\-]{35}$", "review"),
+    ("Stripe secret key (live)", r"^(sk_live_)[A-Za-z0-9]{24,}$", "secret"),
+    ("Stripe secret key (test)", r"^(sk_test_)[A-Za-z0-9]{24,}$", "review"),
+    ("Stripe publishable key", r"^(pk_(?:live|test)_)[A-Za-z0-9]{24,}$", "public"),
+    ("Google API key", r"^(AIza)[0-9A-Za-z_\-]{35}$", "review"),
 ]
 
 
@@ -44,17 +44,20 @@ def looks_like_placeholder(s: str) -> bool:
 
 
 def detect_key_type(s: str):
+    """Trả về (tên, mức độ, phần thân sau tiền tố), hoặc (None, None, s)."""
     for name, pattern, level in KEY_PATTERNS:
-        if re.match(pattern, s):
-            return name, level
-    return None, None
+        m = re.match(pattern, s)
+        if m:
+            return name, level, s[m.end(1):]
+    return None, None, s
 
 
 def classify(s: str) -> str:
-    if looks_like_placeholder(s):
-        return "🟢 FP (placeholder)"
+    name, level, body = detect_key_type(s)
 
-    name, level = detect_key_type(s)
+    # Soi placeholder trên PHẦN THÂN, không tính tiền tố như sk_test_
+    if looks_like_placeholder(body):
+        return "🟢 FP (placeholder)"
     if level == "public":
         return f"🟢 FP (public by design: {name})"
     if level == "review":
@@ -92,6 +95,7 @@ def demo_samples() -> list:
         fake("gh" + "p_", 36),
         fake("AK" + "IA", 16, string.ascii_uppercase + string.digits),
         fake("sk_" + "live_", 24),
+        fake("sk_" + "test_", 24),     
         fake("pk_" + "live_", 24),
         fake("AI" + "za", 35),
     ]
