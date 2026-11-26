@@ -4,13 +4,16 @@ A small Python tool to triage suspected secrets found during GitHub recon.
 It scores each string and labels it as a likely false positive, needs review, or suspicious.
 
 ## How it works
+0. **Private key detection**: `-----BEGIN ... PRIVATE KEY-----` blocks are always flagged first,
+   so long random bodies cannot be dropped by the placeholder filter.
 1. **Placeholder filter**: drops values containing words like `example`, `your`, `invalid`, `test`.
 2. **Key-type detection**: recognizes known formats by prefix (GitHub PAT, AWS access key ID,
    Stripe secret/publishable keys, Google API key) and rates them as secret, review, or public by design.
 3. **Shannon entropy** for unknown formats, with charset-aware thresholds:
    - hex strings (max entropy 4.0): threshold 3.0
    - mixed alphanumeric: threshold 4.5
-
+4. **AWS key pairing** (gitleaks mode): a 40-character string on the line right above or below
+   an AWS access key ID, in the same file and commit, is labeled as the paired AWS secret key.
 ## Usage
 
 ```bash

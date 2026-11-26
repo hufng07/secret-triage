@@ -25,6 +25,8 @@ KEY_PATTERNS = [
     ("Google API key", r"^(AIza)[0-9A-Za-z_\-]{35}$", "review"),
 ]
 
+PRIVATE_KEY_RE = re.compile(r"^-----BEGIN ([A-Z]+ )*PRIVATE KEY-----")
+AWS_SECRET_RE = re.compile(r"^[A-Za-z0-9/+]{40}$")
 
 def shannon_entropy(s: str) -> float:
     """Đo độ 'lộn xộn' của chuỗi. Càng cao càng giống chuỗi ngẫu nhiên."""
@@ -54,6 +56,8 @@ def detect_key_type(s: str):
 
 
 def classify(s: str) -> str:
+    if PRIVATE_KEY_RE.match(s):
+        return "🔴 SUSPICIOUS (private key)"
     name, level, body = detect_key_type(s)
 
     # Soi placeholder trên PHẦN THÂN, không tính tiền tố như sk_test_
@@ -99,6 +103,7 @@ def demo_samples() -> list:
         fake("sk_" + "test_", 24),     
         fake("pk_" + "live_", 24),
         fake("AI" + "za", 35),
+        fake("-----BEGIN " + "RSA PRIVATE KEY-----", 64),
     ]
 
 def mask(s: str) -> str:
@@ -113,13 +118,23 @@ def report_gitleaks(path: str, unmask: bool = False) -> None:
     with open(path, encoding="utf-8") as fh:
         findings = json.load(fh)
 
+    # Vòng 1: ghi lại vị trí (file, commit, dòng) của mọi AWS access key ID
+    aws_id_spots = set()
+    for f in findings:
+        name, _, _ = detect_key_type(f.get("Secret", ""))
+        if name == "AWS access key ID":
+            aws_id_spots.add((f.get("File", "?"), f.get("Commit", ""), f.get("StartLine", 0)))
+
+    # Vòng 2: chấm điểm; chuỗi 40 ký tự nằm sát một access key ID là secret key AWS
     rows = []
     for f in findings:
         secret = f.get("Secret", "")
+        file, commit, line = f.get("File", "?"), f.get("Commit", ""), f.get("StartLine", 0)
         label = classify(secret)
-        where = f"{f.get('File', '?')}:{f.get('StartLine', '?')}"
-        commit = f.get("Commit", "")[:7]
-        rows.append((label, where, commit, secret))
+        near_id = any((file, commit, line + d) in aws_id_spots for d in (-1, 1))
+        if AWS_SECRET_RE.match(secret) and near_id:
+            label = "🔴 SUSPICIOUS (AWS secret key, paired)"
+        rows.append((label, f"{file}:{line}", commit[:7], secret))
 
     order = {"🔴": 0, "🟡": 1, "🟢": 2}
     rows.sort(key=lambda r: order.get(r[0][0], 3))   # 🔴 lên đầu
