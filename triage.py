@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import random
 import re
 import string
@@ -27,6 +28,25 @@ KEY_PATTERNS = [
 
 PRIVATE_KEY_RE = re.compile(r"^-----BEGIN ([A-Z]+ )*PRIVATE KEY-----")
 AWS_SECRET_RE = re.compile(r"^[A-Za-z0-9/+]{40}$")
+# Đường dẫn "ít rủi ro": test, dữ liệu mẫu, tài liệu
+LOW_RISK_PATH_RE = re.compile(
+    r"(^|/)(tests?|testdata|fixtures?|mocks?|examples?|samples?|docs?)/"
+    r"|_test\.|(^|/)test_[^/]*$|\.md$",
+    re.IGNORECASE,
+)
+# Tên file "nguy hiểm": file tạm, file sao lưu, file cũ
+HIGH_RISK_PATH_RE = re.compile(r"(^|/)(temp|tmp|backup|old)([._-][^/]*)?$|\.bak$", re.IGNORECASE)
+
+
+def adjust_for_path(label: str, path: str) -> str:
+    """Checklist câu 1: hạ hoặc tăng một mức tùy theo đường dẫn file."""
+    if LOW_RISK_PATH_RE.search(path):
+        down = {"🔴": "🟡", "🟡": "🟢"}
+        return down.get(label[0], label[0]) + label[1:] + " [test/docs path]"
+    if HIGH_RISK_PATH_RE.search(path):
+        up = {"🟡": "🔴", "🟢": "🟡"}
+        return up.get(label[0], label[0]) + label[1:] + " [risky filename]"
+    return label
 
 def shannon_entropy(s: str) -> float:
     """Đo độ 'lộn xộn' của chuỗi. Càng cao càng giống chuỗi ngẫu nhiên."""
@@ -134,15 +154,17 @@ def report_gitleaks(path: str, unmask: bool = False) -> None:
         near_id = any((file, commit, line + d) in aws_id_spots for d in (-1, 1))
         if AWS_SECRET_RE.match(secret) and near_id:
             label = "🔴 SUSPICIOUS (AWS secret key, paired)"
+        label = adjust_for_path(label, file)
         rows.append((label, f"{file}:{line}", commit[:7], secret))
 
     order = {"🔴": 0, "🟡": 1, "🟢": 2}
     rows.sort(key=lambda r: order.get(r[0][0], 3))   # 🔴 lên đầu
 
-    print(f"{len(rows)} findings from gitleaks\n")
+    counts = {e: sum(1 for r in rows if r[0][0] == e) for e in "🔴🟡🟢"}
+    print(f"{len(rows)} findings:  🔴 {counts['🔴']}  🟡 {counts['🟡']}  🟢 {counts['🟢']}\n")
     for label, where, commit, secret in rows:
         shown = secret if unmask else mask(secret)
-        print(f"{label:<50} {where:<10} {commit:<8} {shown}")
+        print(f"{label:<65} {where:<10} {commit:<8} {shown}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -177,6 +199,11 @@ def main():
         s = extract_value(line)
         print(f"{shannon_entropy(s):.2f}  {s:<45} {classify(s)}")
 
-
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BrokenPipeError:
+        # head/less đóng ống sớm: không phải lỗi, thoát êm
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(0)

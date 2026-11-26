@@ -14,6 +14,8 @@ It scores each string and labels it as a likely false positive, needs review, or
    - mixed alphanumeric: threshold 4.5
 4. **AWS key pairing** (gitleaks mode): a 40-character string on the line right above or below
    an AWS access key ID, in the same file and commit, is labeled as the paired AWS secret key.
+5. **Path-aware ranking** (gitleaks mode): findings in test, fixture, example or docs paths
+   are lowered one level; files named like `temp`, `tmp`, `backup`, `old` or `*.bak` are raised one level.
 ## Usage
 
 ```bash
@@ -41,6 +43,7 @@ Lines starting with `#` are skipped. For `KEY=value` lines, only the value is sc
 - Placeholder matching uses substrings, so `here` also matches `where` and `test` matches `latest`.
 - Entropy alone cannot separate long placeholders from short real keys.
 - Credentials embedded in URLs (`scheme://user:pass@host`) are not parsed yet.
+- Path rules lower findings in test folders but never drop them: real keys are sometimes copied into tests.
 
 ## Ethics
 
