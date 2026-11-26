@@ -221,3 +221,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Hunting output: never commit
+recon/
+reports/
+*report*.json
