@@ -19,10 +19,15 @@ PLACEHOLDER_WORDS = [
 # (tên loại key, regex, mức độ): secret / review / public
 KEY_PATTERNS = [
     ("GitHub personal access token", r"^(ghp_)[A-Za-z0-9]{36}$", "secret"),
+    ("GitLab personal access token", r"^(glpat-)[A-Za-z0-9_\-]{20,}$", "secret"),
     ("AWS access key ID", r"^(AKIA|ASIA)[A-Z0-9]{16}$", "secret"),
     ("Stripe secret key (live)", r"^(sk_live_)[A-Za-z0-9]{24,}$", "secret"),
     ("Stripe secret key (test)", r"^(sk_test_)[A-Za-z0-9]{24,}$", "review"),
     ("Stripe publishable key", r"^(pk_(?:live|test)_)[A-Za-z0-9]{24,}$", "public"),
+    ("Slack token", r"^(xox[abposr]-)[A-Za-z0-9\-]{10,}$", "secret"),
+    ("Slack webhook URL", r"^(https://hooks\.slack\.com/services/)[A-Za-z0-9/]+$", "review"),
+    ("Anthropic API key", r"^(sk-ant-)[A-Za-z0-9_\-]{20,}$", "secret"),   # phải đứng trước OpenAI
+    ("OpenAI API key", r"^(sk-(?:proj-|svcacct-|admin-)?)[A-Za-z0-9_\-]{20,}$", "secret"),
     ("Google API key", r"^(AIza)[0-9A-Za-z_\-]{35}$", "review"),
 ]
 
@@ -123,6 +128,9 @@ def demo_samples() -> list:
         fake("sk_" + "test_", 24),     
         fake("pk_" + "live_", 24),
         fake("AI" + "za", 35),
+        fake("gl" + "pat-", 20),
+        fake("xo" + "xb-", 40, string.ascii_letters + string.digits + "-"),
+        fake("sk-" + "proj-", 40),
         fake("-----BEGIN " + "RSA PRIVATE KEY-----", 64),
     ]
 
