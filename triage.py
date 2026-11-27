@@ -39,12 +39,16 @@ PRIVATE_KEY_RE = re.compile(r"^-----BEGIN ([A-Z]+ )*PRIVATE KEY-----")
 AWS_SECRET_RE = re.compile(r"^[A-Za-z0-9/+]{40}$")
 JWT_RE = re.compile(r"^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$")
 
-# Đường dẫn "ít rủi ro": test, dữ liệu mẫu, tài liệu, Storybook
+# Đường dẫn "ít rủi ro": test, mẫu, tài liệu, Storybook, code vendored, lockfile, file dự án Xcode
 LOW_RISK_PATH_RE = re.compile(
-    r"(^|/)(tests?|testdata|fixtures?|mocks?|examples?|samples?|docs?)/"
-    r"|_test\.|(^|/)test_[^/]*$|\.stories\.|\.md$",
-    re.IGNORECASE,
-)
+    r"(^|/)(tests?|testing|testdata|__tests__|spec|e2e|fixtures?|mocks?"
+    r"|examples?|example-[^/]*|samples?|docs?"
+    r"|vendor|node_modules|Pods|contrib|vs)/"
+    r"|_test\.|(^|/)test_[^/]*$|\.stories\.|\.md$"
+    r"|\.(pbxproj|xcscmblueprint)$"
+    r"|(^|/)(Podfile|Gemfile|Cargo|poetry|composer)\.lock$",
+    re.IGNORECASE)
+
 # Tên file "nguy hiểm": file tạm, sao lưu, file cũ, file log (crash dump, derby.log...)
 HIGH_RISK_PATH_RE = re.compile(
     r"(^|/)(temp|tmp|backup|old)([._-][^/]*)?$|\.bak$|\.log$",
@@ -52,6 +56,14 @@ HIGH_RISK_PATH_RE = re.compile(
 )
 # Repo có tên kiểu "mender-testkit", "mender-test-containers" (nhưng không bắt "latest")
 TEST_REPO_RE = re.compile(r"(^|[-_.])test", re.IGNORECASE)
+
+# Tên biến được thiết kế để công khai: bị nhúng vào JS gửi xuống trình duyệt
+PUBLIC_NAME_RE = re.compile(
+    r"\b(REACT_APP|NEXT_PUBLIC|VITE|EXPO_PUBLIC|GATSBY)_\w+"
+    r"|\w*(SITE_KEY|CLIENT_KEY|PUBLISHABLE_KEY)\b",
+    re.IGNORECASE)
+LEVELS = ["🟢", "🟡", "🔴"]
+LEVEL_WORDS = {"🟢": "LOW", "🟡": "REVIEW", "🔴": "SUSPICIOUS"}
 
 
 def shannon_entropy(s: str) -> float:
@@ -133,15 +145,26 @@ def classify(s: str) -> str:
     return "🟡 REVIEW"
 
 
+def shift_level(label: str, step: int, reason: str) -> str:
+    """Move a label down (-1) or up (+1) one level, keeping what it was before."""
+    emoji, _, rest = label.partition(" ")
+    if emoji not in LEVELS:
+        return f"{label} [{reason}]"
+    i = LEVELS.index(emoji)
+    j = min(max(i + step, 0), len(LEVELS) - 1)
+    if j == i:
+        return f"{label} [{reason}]"
+    new = LEVELS[j]
+    return f"{new} {LEVEL_WORDS[new]} (was {rest}) [{reason}]"
+
+
 def adjust_for_path(label: str, path: str, test_repo: bool = False) -> str:
     """Checklist câu 1: hạ hoặc tăng một mức tùy đường dẫn file và tên repo."""
     if LOW_RISK_PATH_RE.search(path) or test_repo:
-        reason = "test/docs path" if LOW_RISK_PATH_RE.search(path) else "test repo"
-        down = {"🔴": "🟡", "🟡": "🟢"}
-        return down.get(label[0], label[0]) + label[1:] + f" [{reason}]"
+        reason = "low-risk path" if LOW_RISK_PATH_RE.search(path) else "test repo"
+        return shift_level(label, -1, reason)
     if HIGH_RISK_PATH_RE.search(path):
-        up = {"🟡": "🔴", "🟢": "🟡"}
-        return up.get(label[0], label[0]) + label[1:] + " [risky filename]"
+        return shift_level(label, +1, "risky filename")
     return label
 
 
@@ -210,7 +233,7 @@ def report_gitleaks(path: str, unmask: bool = False) -> None:
         if name == "AWS access key ID":
             aws_id_spots.add((f.get("File", "?"), f.get("Commit", ""), f.get("StartLine", 0)))
 
-    # Vòng 2: chấm điểm, ghép cặp AWS, rồi xét đường dẫn và tên repo
+    # Vòng 2: chấm điểm, ghép cặp AWS, rồi xét đường dẫn, tên repo, tên biến
     rows = []
     for f in findings:
         secret = f.get("Secret", "")
@@ -220,16 +243,27 @@ def report_gitleaks(path: str, unmask: bool = False) -> None:
         if AWS_SECRET_RE.match(secret) and near_id:
             label = "🔴 SUSPICIOUS (AWS secret key, paired)"
         label = adjust_for_path(label, file, test_repo)
+        if PUBLIC_NAME_RE.search(f.get("Match", "")):
+            label = shift_level(label, -1, "public-by-design name")
         rows.append((label, f"{file}:{line}", commit[:7], secret))
 
+    # Vòng 3: cùng một secret ở nhiều file/commit gộp thành 1 dòng, giữ dòng nặng nhất
     order = {"🔴": 0, "🟡": 1, "🟢": 2}
-    rows.sort(key=lambda r: order.get(r[0][0], 3))   # 🔴 lên đầu
+    total = len(rows)
+    best, times = {}, Counter()
+    for r in rows:
+        times[r[3]] += 1
+        old = best.get(r[3])
+        if old is None or order.get(r[0][0], 3) < order.get(old[0][0], 3):
+            best[r[3]] = r
+    rows = sorted(best.values(), key=lambda r: order.get(r[0][0], 3))  # 🔴 lên đầu
 
     counts = {e: sum(1 for r in rows if r[0][0] == e) for e in "🔴🟡🟢"}
-    print(f"{len(rows)} findings:  🔴 {counts['🔴']}  🟡 {counts['🟡']}  🟢 {counts['🟢']}\n")
+    print(f"{total} findings, {len(rows)} unique:  🔴 {counts['🔴']}  🟡 {counts['🟡']}  🟢 {counts['🟢']}\n")
     for label, where, commit, secret in rows:
         shown = secret if unmask else mask(secret)
-        print(f"{label:<65} {where:<10} {commit:<8} {shown}")
+        extra = f"  (x{times[secret]})" if times[secret] > 1 else ""
+        print(f"{label:<65} {where:<10} {commit:<8} {shown}{extra}")
 
 
 def main():
