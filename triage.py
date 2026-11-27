@@ -134,7 +134,7 @@ def classify_url(s: str):
     user, pw, host = m.group(1), m.group(2), m.group(3).lower()
     if pw[:1] in "$%{<" or (pw.isupper() and "_" in pw):
         return "🟢 FP (URL creds are a template variable)"
-    if pw.lower() in WEAK_PASSWORDS or pw == user or looks_like_placeholder(pw):
+    if pw.lower() in WEAK_PASSWORDS or pw == user or len(pw) < 6 or looks_like_placeholder(pw):
         return f"🟢 FP (placeholder URL creds, host {host})"
     if host in LOCAL_HOSTS or "." not in host or host.endswith((".local", ".test", "example.com")):
         return f"🟡 REVIEW (URL creds, local/dev host {host})"

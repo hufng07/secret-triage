@@ -71,6 +71,25 @@ python3 triage.py --gitleaks /workspaces/recon/ORG/reports/REPO.json
   credentials in URLs, so private registry tokens in lockfiles are not missed.
 - Clones and reports live in `/workspaces/recon` (outside the repo). Never commit them.
 
+## actions_audit.py: GitHub Actions audit
+
+Static, read-only check of workflow files. It never runs or triggers anything.
+
+```bash
+python3 actions_audit.py path/to/repo          # reads .github/workflows/*.yml
+python3 actions_audit.py tests/fixtures/workflows
+python3 org_recon.py ORG --actions              # audit every repo in an org
+```
+
+- **Script injection:** outsider-controlled input (`github.event.issue.title`, `...pull_request.body`,
+  `github.head_ref`...) pasted into `run:` or `script:`. Red when outsiders can trigger the workflow.
+- **Pwn request:** `pull_request_target` / `workflow_run` that fetches PR code. Red when it bypasses
+  `actions/checkout` (`gh pr checkout`, `git fetch ... pull/`), yellow for a plain head checkout,
+  which `actions/checkout` v7+ blocks by default.
+- Says so when it finds no workflow files, so "0 findings" never means "nothing was read".
+- For hardening checks (token permissions, pinned actions) use [zizmor](https://docs.zizmor.sh/) as a second opinion.
+- **Never** open issues or PRs against a target to "test" a finding. Report from the YAML alone.
+
 ## Ethics
 
 Built for authorized security testing and bug bounty programs only.

@@ -3,7 +3,9 @@
 Only use on orgs that are in scope of a bug bounty program, or on repos made for
 practice. Never use any secret you find.
 """
+import actions_audit
 import argparse
+import glob
 import json
 import os
 import shutil
@@ -69,6 +71,17 @@ def scan(repo_dir: str, reports_dir: str, name: str) -> int:
     return len(findings)
 
 
+def audit_actions(repo_dir: str) -> int:
+    """Static GitHub Actions audit of the repo's current workflows. Returns the number of hits."""
+    hits = 0
+    for path in sorted(glob.glob(os.path.join(repo_dir, ".github", "workflows", "*.y*ml"))):
+        _, findings = actions_audit.audit_file(path)
+        for label, no, what in findings:
+            print(f"   {label}  {os.path.relpath(path, repo_dir)}:{no}  {what}")
+        hits += len(findings)
+    return hits
+
+
 def main():
     parser = argparse.ArgumentParser(description="Clone an org's repos and scan them with gitleaks.")
     parser.add_argument("org", help="GitHub organization (must be in scope!)")
@@ -77,6 +90,7 @@ def main():
     parser.add_argument("--suffix", default="", help="only repos whose name ends with this, e.g. -sdk")
     parser.add_argument("--include-archived", action="store_true", help="also scan archived repos")
     parser.add_argument("--skip", default="", help="comma-separated repo names to skip")
+    parser.add_argument("--actions", action="store_true", help="also audit GitHub Actions workflows")
     args = parser.parse_args()
 
     repos_dir = os.path.join(args.workdir, args.org, "repos")
@@ -89,7 +103,7 @@ def main():
              if r["name"].endswith(args.suffix) and r["name"] not in skip]
     note = "incl. archived" if args.include_archived else "no archived"
     print(f"{len(repos)} repos in {args.org} (no forks, {note}, suffix '{args.suffix}', skipped {len(skip)})\n")
-
+    actions_total = 0
     summary = []
     for r in repos:
         name = r["name"]
@@ -104,6 +118,8 @@ def main():
             clone(r["url"], repo_dir)
             count = scan(repo_dir, reports_dir, name)
         print(f"   {count} findings")
+        if args.actions:
+            actions_total += audit_actions(os.path.join(repos_dir, name))
         summary.append((count, name))
 
     print("\n== SUMMARY (most findings first)")
@@ -111,6 +127,9 @@ def main():
         print(f"{count:>5}  {name}")
     print(f"\nTriage a repo with:  python3 triage.py --gitleaks {reports_dir}/<name>.json")
 
+    if args.actions:
+            print(f"\nActions audit: {actions_total} hits. Second opinion: zizmor --offline <repo>/.github/workflows/*.yml")
 
+            
 if __name__ == "__main__":
     main()
