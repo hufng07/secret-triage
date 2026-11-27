@@ -14,8 +14,12 @@ It scores each string and labels it as a likely false positive, needs review, or
    - mixed alphanumeric: threshold 4.5
 4. **AWS key pairing** (gitleaks mode): a 40-character string on the line right above or below
    an AWS access key ID, in the same file and commit, is labeled as the paired AWS secret key.
-5. **Path-aware ranking** (gitleaks mode): findings in test, fixture, example or docs paths
-   are lowered one level; files named like `temp`, `tmp`, `backup`, `old` or `*.bak` are raised one level.
+5. **Path-aware ranking** (gitleaks mode): findings in test, fixture, example, docs or Storybook
+   (`.stories.`) paths, or in repos named like `*-test*`, are lowered one level; temp, backup,
+   old and `.log` files (e.g. Java crash dumps) are raised one level.
+6. **JWT expiry check**: JWTs are decoded locally (never sent anywhere) and their `exp` claim
+   is compared to the current time. Expired tokens are marked as false positives;
+   tokens with no expiry are flagged as suspicious.
 ## Usage
 
 ```bash

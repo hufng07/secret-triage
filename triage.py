@@ -1,4 +1,7 @@
+"""secret-triage: triage suspected secrets found during GitHub recon."""
 import argparse
+import base64
+import datetime
 import json
 import math
 import os
@@ -6,6 +9,7 @@ import random
 import re
 import string
 import sys
+import time
 from collections import Counter
 
 HEX_CHARS = set(string.hexdigits)
@@ -16,7 +20,7 @@ PLACEHOLDER_WORDS = [
     "invalid", "placeholder", "changeme", "xxx", "here", "password",
 ]
 
-# (tên loại key, regex, mức độ): secret / review / public
+# (tên loại key, regex có tiền tố trong nhóm 1, mức độ): secret / review / public
 KEY_PATTERNS = [
     ("GitHub personal access token", r"^(ghp_)[A-Za-z0-9]{36}$", "secret"),
     ("GitLab personal access token", r"^(glpat-)[A-Za-z0-9_\-]{20,}$", "secret"),
@@ -33,25 +37,22 @@ KEY_PATTERNS = [
 
 PRIVATE_KEY_RE = re.compile(r"^-----BEGIN ([A-Z]+ )*PRIVATE KEY-----")
 AWS_SECRET_RE = re.compile(r"^[A-Za-z0-9/+]{40}$")
-# Đường dẫn "ít rủi ro": test, dữ liệu mẫu, tài liệu
+JWT_RE = re.compile(r"^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$")
+
+# Đường dẫn "ít rủi ro": test, dữ liệu mẫu, tài liệu, Storybook
 LOW_RISK_PATH_RE = re.compile(
     r"(^|/)(tests?|testdata|fixtures?|mocks?|examples?|samples?|docs?)/"
-    r"|_test\.|(^|/)test_[^/]*$|\.md$",
+    r"|_test\.|(^|/)test_[^/]*$|\.stories\.|\.md$",
     re.IGNORECASE,
 )
-# Tên file "nguy hiểm": file tạm, file sao lưu, file cũ
-HIGH_RISK_PATH_RE = re.compile(r"(^|/)(temp|tmp|backup|old)([._-][^/]*)?$|\.bak$", re.IGNORECASE)
+# Tên file "nguy hiểm": file tạm, sao lưu, file cũ, file log (crash dump, derby.log...)
+HIGH_RISK_PATH_RE = re.compile(
+    r"(^|/)(temp|tmp|backup|old)([._-][^/]*)?$|\.bak$|\.log$",
+    re.IGNORECASE,
+)
+# Repo có tên kiểu "mender-testkit", "mender-test-containers" (nhưng không bắt "latest")
+TEST_REPO_RE = re.compile(r"(^|[-_.])test", re.IGNORECASE)
 
-
-def adjust_for_path(label: str, path: str) -> str:
-    """Checklist câu 1: hạ hoặc tăng một mức tùy theo đường dẫn file."""
-    if LOW_RISK_PATH_RE.search(path):
-        down = {"🔴": "🟡", "🟡": "🟢"}
-        return down.get(label[0], label[0]) + label[1:] + " [test/docs path]"
-    if HIGH_RISK_PATH_RE.search(path):
-        up = {"🟡": "🔴", "🟢": "🟡"}
-        return up.get(label[0], label[0]) + label[1:] + " [risky filename]"
-    return label
 
 def shannon_entropy(s: str) -> float:
     """Đo độ 'lộn xộn' của chuỗi. Càng cao càng giống chuỗi ngẫu nhiên."""
@@ -80,9 +81,39 @@ def detect_key_type(s: str):
     return None, None, s
 
 
+def jwt_payload(token: str):
+    """Giải mã payload của JWT. Chỉ ĐỌC: không kiểm tra chữ ký, không gửi đi đâu."""
+    try:
+        part = token.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        return json.loads(base64.urlsafe_b64decode(part))
+    except (ValueError, IndexError):
+        return None
+
+
+def classify_jwt(s: str) -> str:
+    """JWT tự khai ngày hết hạn (exp): hết hạn rồi thì vô hại."""
+    payload = jwt_payload(s)
+    if not isinstance(payload, dict):
+        return "🟡 REVIEW (JWT-like, cannot decode)"
+    exp = payload.get("exp")
+    if not isinstance(exp, (int, float)):
+        return "🔴 SUSPICIOUS (JWT, no expiry)"
+    try:
+        when = datetime.datetime.fromtimestamp(exp, datetime.timezone.utc).date()
+    except (OverflowError, OSError, ValueError):
+        when = "?"
+    if exp < time.time():
+        return f"🟢 FP (expired JWT, exp {when})"
+    return f"🔴 SUSPICIOUS (JWT, valid until {when})"
+
+
 def classify(s: str) -> str:
     if PRIVATE_KEY_RE.match(s):
         return "🔴 SUSPICIOUS (private key)"
+    if JWT_RE.match(s):
+        return classify_jwt(s)
+
     name, level, body = detect_key_type(s)
 
     # Soi placeholder trên PHẦN THÂN, không tính tiền tố như sk_test_
@@ -102,9 +133,28 @@ def classify(s: str) -> str:
     return "🟡 REVIEW"
 
 
+def adjust_for_path(label: str, path: str, test_repo: bool = False) -> str:
+    """Checklist câu 1: hạ hoặc tăng một mức tùy đường dẫn file và tên repo."""
+    if LOW_RISK_PATH_RE.search(path) or test_repo:
+        reason = "test/docs path" if LOW_RISK_PATH_RE.search(path) else "test repo"
+        down = {"🔴": "🟡", "🟡": "🟢"}
+        return down.get(label[0], label[0]) + label[1:] + f" [{reason}]"
+    if HIGH_RISK_PATH_RE.search(path):
+        up = {"🟡": "🔴", "🟢": "🟡"}
+        return up.get(label[0], label[0]) + label[1:] + " [risky filename]"
+    return label
+
+
 def fake(prefix: str, n: int, chars: str = string.ascii_letters + string.digits) -> str:
     """Tạo key GIẢ đúng format để test."""
     return prefix + "".join(random.choices(chars, k=n))
+
+
+def fake_jwt(exp: int) -> str:
+    """Tạo JWT GIẢ (chữ ký ngẫu nhiên) để test logic đọc ngày hết hạn."""
+    def enc(d):
+        return base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+    return enc({"alg": "RS256"}) + "." + enc({"sub": "demo", "exp": exp}) + "." + fake("", 43)
 
 
 def extract_value(line: str) -> str:
@@ -125,14 +175,17 @@ def demo_samples() -> list:
         fake("gh" + "p_", 36),
         fake("AK" + "IA", 16, string.ascii_uppercase + string.digits),
         fake("sk_" + "live_", 24),
-        fake("sk_" + "test_", 24),     
+        fake("sk_" + "test_", 24),
         fake("pk_" + "live_", 24),
         fake("AI" + "za", 35),
         fake("gl" + "pat-", 20),
         fake("xo" + "xb-", 40, string.ascii_letters + string.digits + "-"),
         fake("sk-" + "proj-", 40),
         fake("-----BEGIN " + "RSA PRIVATE KEY-----", 64),
+        fake_jwt(1731706274),   # hết hạn 2024-11-15 (giống vụ Cognito)
+        fake_jwt(4102444800),   # còn hạn tới 2100-01-01
     ]
+
 
 def mask(s: str) -> str:
     """Che secret: chỉ hiện 6 ký tự đầu và độ dài."""
@@ -146,6 +199,10 @@ def report_gitleaks(path: str, unmask: bool = False) -> None:
     with open(path, encoding="utf-8") as fh:
         findings = json.load(fh)
 
+    # Tên repo lấy từ tên file báo cáo (org_recon.py đặt tên <repo>.json)
+    repo = os.path.splitext(os.path.basename(path))[0]
+    test_repo = bool(TEST_REPO_RE.search(repo))
+
     # Vòng 1: ghi lại vị trí (file, commit, dòng) của mọi AWS access key ID
     aws_id_spots = set()
     for f in findings:
@@ -153,7 +210,7 @@ def report_gitleaks(path: str, unmask: bool = False) -> None:
         if name == "AWS access key ID":
             aws_id_spots.add((f.get("File", "?"), f.get("Commit", ""), f.get("StartLine", 0)))
 
-    # Vòng 2: chấm điểm; chuỗi 40 ký tự nằm sát một access key ID là secret key AWS
+    # Vòng 2: chấm điểm, ghép cặp AWS, rồi xét đường dẫn và tên repo
     rows = []
     for f in findings:
         secret = f.get("Secret", "")
@@ -162,7 +219,7 @@ def report_gitleaks(path: str, unmask: bool = False) -> None:
         near_id = any((file, commit, line + d) in aws_id_spots for d in (-1, 1))
         if AWS_SECRET_RE.match(secret) and near_id:
             label = "🔴 SUSPICIOUS (AWS secret key, paired)"
-        label = adjust_for_path(label, file)
+        label = adjust_for_path(label, file, test_repo)
         rows.append((label, f"{file}:{line}", commit[:7], secret))
 
     order = {"🔴": 0, "🟡": 1, "🟢": 2}
@@ -174,6 +231,7 @@ def report_gitleaks(path: str, unmask: bool = False) -> None:
         shown = secret if unmask else mask(secret)
         print(f"{label:<65} {where:<10} {commit:<8} {shown}")
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Triage suspected secrets: placeholder filter, key-type detection, entropy."
@@ -184,6 +242,7 @@ def main():
     parser.add_argument("--gitleaks", metavar="REPORT", help="score findings from a gitleaks JSON report")
     parser.add_argument("--unmask", action="store_true", help="show full secrets (masked by default)")
     args = parser.parse_args()
+
     if args.gitleaks:
         report_gitleaks(args.gitleaks, args.unmask)
         return
@@ -203,13 +262,15 @@ def main():
 
     for line in lines:
         if not line.strip() or line.strip().startswith("#"):
-            continue                  # bỏ dòng trống và dòng comment
+            continue
         s = extract_value(line)
         print(f"{shannon_entropy(s):.2f}  {s:<45} {classify(s)}")
+
 
 if __name__ == "__main__":
     try:
         main()
+        sys.stdout.flush()      # đẩy hết dữ liệu ra ngay trong vùng try
     except BrokenPipeError:
         # head/less đóng ống sớm: không phải lỗi, thoát êm
         devnull = os.open(os.devnull, os.O_WRONLY)
