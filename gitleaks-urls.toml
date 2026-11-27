@@ -1,0 +1,15 @@
+# Pass 2: URL credentials only. No useDefault, so lockfiles ARE scanned
+# (the default config skips package-lock.json, yarn.lock, poetry.lock...).
+[[allowlists]]
+description = "media and minified builds"
+paths = [
+  '''\.min\.js(\.map)?$''',
+  '''\.js\.map$''',
+  '''\.(mp4|mov|png|jpe?g|gif|woff2?|ttf|ico|pdf)$''',
+]
+
+[[rules]]
+id = "url-credentials"
+description = "Credentials in a URL"
+regex = '''[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@"'<>]+:[^\s:/@"'<>]+@[a-zA-Z0-9.\-]+'''
+keywords = ["://"]

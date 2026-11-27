@@ -32,9 +32,9 @@ def clone(url, dest):
     os.rename(tmp, dest)
 
 
-def scan(repo_dir: str, reports_dir: str, name: str) -> int:
-    """Run gitleaks over the full history, return the number of findings."""
-    config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gitleaks-recon.toml")
+def run_gitleaks(repo_dir: str, reports_dir: str, config_name: str, out_name: str):
+    """One gitleaks pass with the given config. Returns the findings list, or None on failure."""
+    config = os.path.join(os.path.dirname(os.path.abspath(__file__)), config_name)
     subprocess.run(
         ["docker", "run", "--rm",
          "-v", f"{os.path.abspath(repo_dir)}:/repo",
@@ -44,15 +44,29 @@ def scan(repo_dir: str, reports_dir: str, name: str) -> int:
          "git", "/repo", "--no-banner",
          "--config", "/config.toml",
          "--report-format", "json",
-         "--report-path", f"/reports/{name}.json"],
+         "--report-path", f"/reports/{out_name}"],
         capture_output=True,
     )
-    report = os.path.join(reports_dir, f"{name}.json")
-    if not os.path.exists(report):
+    path = os.path.join(reports_dir, out_name)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        findings = json.load(fh)
+    os.remove(path)
+    return findings
+
+
+def scan(repo_dir: str, reports_dir: str, name: str) -> int:
+    """Pass 1: default rules + noise filters. Pass 2: URL creds, lockfiles included."""
+    main = run_gitleaks(repo_dir, reports_dir, "gitleaks-recon.toml", f"{name}.pass1.tmp")
+    urls = run_gitleaks(repo_dir, reports_dir, "gitleaks-urls.toml", f"{name}.pass2.tmp")
+    if main is None or urls is None:
         print("   warning: gitleaks wrote no report (check docker / config)")
         return 0
-    with open(report, encoding="utf-8") as fh:
-        return len(json.load(fh))
+    findings = main + urls
+    with open(os.path.join(reports_dir, f"{name}.json"), "w", encoding="utf-8") as fh:
+        json.dump(findings, fh, indent=1)
+    return len(findings)
 
 
 def main():

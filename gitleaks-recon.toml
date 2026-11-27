@@ -3,12 +3,11 @@
 useDefault = true
 
 [[allowlists]]
-description = "vendored builds, lockfiles and media"
+description = "vendored builds and media"
 paths = [
   '''(^|/)\.yarn/releases/''',
   '''\.min\.js(\.map)?$''',
   '''\.js\.map$''',
-  '''(^|/)(yarn\.lock|package-lock\.json|pnpm-lock\.yaml)$''',
   '''\.(mp4|mov|png|jpe?g|gif|woff2?|ttf|ico)$''',
 ]
 
@@ -22,3 +21,4 @@ regexes = [
     '''(?i)digi-?key[-_:]''',
   '''\b(meta|shift|ctrl|alt)Key\b''',
 ]
+

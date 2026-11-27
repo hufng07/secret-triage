@@ -65,6 +65,12 @@ PUBLIC_NAME_RE = re.compile(
 LEVELS = ["🟢", "🟡", "🔴"]
 LEVEL_WORDS = {"🟢": "LOW", "🟡": "REVIEW", "🔴": "SUSPICIOUS"}
 
+# Mật khẩu trong URL: scheme://user:password@host
+URL_CRED_RE = re.compile(r"^[a-z][a-z0-9+.\-]*://([^:/@\s]+):([^@\s]+)@([^/:?#\s]+)", re.IGNORECASE)
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"}
+WEAK_PASSWORDS = {"password", "pass", "passwd", "secret", "root", "admin",
+                  "changeme", "postgres", "mysql", "guest"}
+
 
 def shannon_entropy(s: str) -> float:
     """Đo độ 'lộn xộn' của chuỗi. Càng cao càng giống chuỗi ngẫu nhiên."""
@@ -120,7 +126,25 @@ def classify_jwt(s: str) -> str:
     return f"🔴 SUSPICIOUS (JWT, valid until {when})"
 
 
+def classify_url(s: str):
+    """Credentials inside a URL. Returns a label, or None if s is not such a URL."""
+    m = URL_CRED_RE.match(s)
+    if not m:
+        return None
+    user, pw, host = m.group(1), m.group(2), m.group(3).lower()
+    if pw[:1] in "$%{<" or (pw.isupper() and "_" in pw):
+        return "🟢 FP (URL creds are a template variable)"
+    if pw.lower() in WEAK_PASSWORDS or pw == user or looks_like_placeholder(pw):
+        return f"🟢 FP (placeholder URL creds, host {host})"
+    if host in LOCAL_HOSTS or "." not in host or host.endswith((".local", ".test", "example.com")):
+        return f"🟡 REVIEW (URL creds, local/dev host {host})"
+    return f"🔴 SUSPICIOUS (credentials in URL, host {host})"
+
+
 def classify(s: str) -> str:
+    url_label = classify_url(s)
+    if url_label:
+        return url_label
     if PRIVATE_KEY_RE.match(s):
         return "🔴 SUSPICIOUS (private key)"
     if JWT_RE.match(s):
