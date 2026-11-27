@@ -60,6 +60,7 @@ python3 org_recon.py ORG --limit 50
 python3 org_recon.py ORG --limit 500 --suffix=-sdk          # only repos ending in -sdk
 python3 org_recon.py ORG --include-archived --skip big-repo  # archived too, skip one
 python3 triage.py --gitleaks /workspaces/recon/ORG/reports/REPO.json
+python3 org_recon.py ORG --osv                    # + dependency CVEs (osv-scanner)
 ```
 
 - **Resume:** a repo that already has a report is skipped, so you can re-run after an interruption.
@@ -67,6 +68,10 @@ python3 triage.py --gitleaks /workspaces/recon/ORG/reports/REPO.json
 - **Noise filters:** `gitleaks-recon.toml` keeps the default rules and drops known false
   positives (vendored builds, media, KiCad DigiKey part names, JS `metaKey`).
 - **Two passes:** gitleaks' default config skips lockfiles (`package-lock.json`, `yarn.lock`,
+- **`--osv`:** runs osv-scanner (Docker) on the current checkout and counts known CVEs per lockfile,
+  split into test/example paths vs the rest. A vulnerable dependency is not a bug by itself: show the
+  vulnerable code is actually reachable (e.g. `govulncheck` for Go) before reporting. SDKs often ship
+  no lockfile, so "no package sources" is normal there.
   `poetry.lock`...). A second pass with `gitleaks-urls.toml` (no defaults) looks only for
   credentials in URLs, so private registry tokens in lockfiles are not missed.
 - Clones and reports live in `/workspaces/recon` (outside the repo). Never commit them.

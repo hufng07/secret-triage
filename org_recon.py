@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import triage
 
 
 def list_repos(org, limit, include_archived=False):
@@ -70,6 +71,30 @@ def scan(repo_dir: str, reports_dir: str, name: str) -> int:
         json.dump(findings, fh, indent=1)
     return len(findings)
 
+def osv_scan(repo_dir: str, reports_dir: str, name: str):
+    """Dependency CVE scan of the current checkout. Returns {lockfile: vuln count}, or None if no lockfiles."""
+    out = os.path.join(reports_dir, f"{name}.osv.json")
+    if not os.path.exists(out):
+        with open(out + ".tmp", "w", encoding="utf-8") as fh:
+            subprocess.run(
+                ["docker", "run", "--rm",
+                 "-v", f"{os.path.abspath(repo_dir)}:/src:ro",
+                 "ghcr.io/google/osv-scanner:latest",
+                 "scan", "source", "-r", "--format", "json", "/src"],
+                stdout=fh, stderr=subprocess.DEVNULL,
+            )  # exit code 1 only means "vulns found": no check=True here
+        os.rename(out + ".tmp", out)
+    if os.path.getsize(out) == 0:
+        return None
+    with open(out, encoding="utf-8") as fh:
+        data = json.load(fh)
+    counts = {}
+    for r in data.get("results", []):
+        n = sum(len(p.get("vulnerabilities", [])) for p in r.get("packages", []))
+        if n:
+            counts[r["source"]["path"].replace("/src/", "", 1)] = n
+    return counts
+
 
 def audit_actions(repo_dir: str) -> int:
     """Static GitHub Actions audit of the repo's current workflows. Returns the number of hits."""
@@ -83,7 +108,7 @@ def audit_actions(repo_dir: str) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Clone an org's repos and scan them with gitleaks.")
+    parser = argparse.ArgumentParser(description="Clone an org's repos and scan them: secrets (gitleaks), optionally GitHub Actions and dependency CVEs.")
     parser.add_argument("org", help="GitHub organization (must be in scope!)")
     parser.add_argument("--limit", type=int, default=5, help="max number of repos (default 5)")
     parser.add_argument("--workdir", default="/workspaces/recon", help="where to put clones and reports")
@@ -91,6 +116,7 @@ def main():
     parser.add_argument("--include-archived", action="store_true", help="also scan archived repos")
     parser.add_argument("--skip", default="", help="comma-separated repo names to skip")
     parser.add_argument("--actions", action="store_true", help="also audit GitHub Actions workflows")
+    parser.add_argument("--osv", action="store_true", help="also scan dependencies for known CVEs")
     args = parser.parse_args()
 
     repos_dir = os.path.join(args.workdir, args.org, "repos")
@@ -120,6 +146,15 @@ def main():
         print(f"   {count} findings")
         if args.actions:
             actions_total += audit_actions(os.path.join(repos_dir, name))
+        if args.osv:
+            counts = osv_scan(os.path.join(repos_dir, name), reports_dir, name)
+            if counts is None:
+                print("   osv: no package sources (no lockfiles)")
+            else:
+                real = {p: n for p, n in counts.items() if not triage.LOW_RISK_PATH_RE.search(p)}
+                print(f"   osv: {sum(counts.values())} vulns, {sum(real.values())} outside test/example paths")
+                for p, n in sorted(real.items(), key=lambda kv: -kv[1])[:3]:
+                    print(f"        {n:>4}  {p}")
         summary.append((count, name))
 
     print("\n== SUMMARY (most findings first)")
@@ -130,6 +165,6 @@ def main():
     if args.actions:
             print(f"\nActions audit: {actions_total} hits. Second opinion: zizmor --offline <repo>/.github/workflows/*.yml")
 
-            
+
 if __name__ == "__main__":
     main()
