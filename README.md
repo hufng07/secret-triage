@@ -1,5 +1,7 @@
 # secret-triage
 
+![tests](https://github.com/hufng07/secret-triage/actions/workflows/tests.yml/badge.svg)
+
 A small Python tool to triage suspected secrets found during GitHub recon.
 It scores each string and labels it as a likely false positive, needs review, or suspicious.
 
@@ -47,6 +49,10 @@ Lines starting with `#` are skipped. For `KEY=value` lines, only the value is sc
 - Placeholder matching uses substrings, so `here` also matches `where` and `test` matches `latest`.
 - Entropy alone cannot separate long placeholders from short real keys.
 - Path rules lower findings in test folders but never drop them: real keys are sometimes copied into tests.
+- `actions_audit.py` reads YAML line by line: it does not follow reusable workflows
+  (`uses: org/repo/.github/workflows/x.yml@ref`) or track untrusted input through `env:` / step outputs.
+- Sequential "random looking" strings such as `a1B2c3d4e5f6` or `0123456789abcdef` are not yet recognised as fake.
+- `--osv` counts known CVEs; it cannot tell whether the vulnerable code is actually reached.
 
 ## org_recon.py: scan a whole org
 
@@ -94,6 +100,13 @@ python3 org_recon.py ORG --actions              # audit every repo in an org
 - Says so when it finds no workflow files, so "0 findings" never means "nothing was read".
 - For hardening checks (token permissions, pinned actions) use [zizmor](https://docs.zizmor.sh/) as a second opinion.
 - **Never** open issues or PRs against a target to "test" a finding. Report from the YAML alone.
+
+## Tests
+
+python3 -m unittest discover -s tests -v
+
+Every test comes from a real hunt or a real bug (DoD anet, Crossfeed, eMCM, LaunchDarkly...).
+CI runs them on every push, then runs `actions_audit.py` on this repo's own workflow.
 
 ## Ethics
 
