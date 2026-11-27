@@ -1,0 +1,24 @@
+# Extra noise filters for org-wide recon. Default gitleaks rules stay on.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "vendored builds, lockfiles and media"
+paths = [
+  '''(^|/)\.yarn/releases/''',
+  '''\.min\.js(\.map)?$''',
+  '''\.js\.map$''',
+  '''(^|/)(yarn\.lock|package-lock\.json|pnpm-lock\.yaml)$''',
+  '''\.(mp4|mov|png|jpe?g|gif|woff2?|ttf|ico)$''',
+]
+
+# False positives of the noisiest rule, seen in real hunts
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "KiCad digikey part names, JS keyboard event props"
+regexTarget = "match"
+regexes = [
+    '''(?i)digi-?key[-_:]''',
+  '''\b(meta|shift|ctrl|alt)Key\b''',
+]

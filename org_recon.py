@@ -6,6 +6,7 @@ practice. Never use any secret you find.
 import argparse
 import json
 import os
+import shutil
 import subprocess
 
 
@@ -18,27 +19,37 @@ def list_repos(org, limit, include_archived=False):
     return json.loads(out)
 
 
-def clone(url: str, dest: str) -> None:
-    """Clone ĐẦY ĐỦ lịch sử (không dùng --depth). Đã có rồi thì bỏ qua."""
+def clone(url, dest):
+    """Clone FULL history into dest.partial, then rename, so dest always means 'complete'."""
     if os.path.isdir(dest):
         print("   already cloned, skipping")
         return
-    subprocess.run(["git", "clone", "--quiet", url, dest], check=True)
+    tmp = dest + ".partial"
+    if os.path.isdir(tmp):
+        print("   found an interrupted clone, starting over")
+        shutil.rmtree(tmp)
+    subprocess.run(["git", "clone", "--quiet", url, tmp], check=True)
+    os.rename(tmp, dest)
 
 
 def scan(repo_dir: str, reports_dir: str, name: str) -> int:
-    """Chạy gitleaks trên toàn bộ lịch sử, trả về số phát hiện."""
+    """Run gitleaks over the full history, return the number of findings."""
+    config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gitleaks-recon.toml")
     subprocess.run(
         ["docker", "run", "--rm",
-         "-v", f"{repo_dir}:/repo",
-         "-v", f"{reports_dir}:/reports",
-         "zricethezav/gitleaks:latest", "git", "/repo", "--no-banner",
-         "--report-format", "json", "--report-path", f"/reports/{name}.json"],
-        capture_output=True,   # giấu output dài của gitleaks
-    )                          # không check=True: tìm thấy leak thì gitleaks trả mã 1
+         "-v", f"{os.path.abspath(repo_dir)}:/repo",
+         "-v", f"{os.path.abspath(reports_dir)}:/reports",
+         "-v", f"{config}:/config.toml:ro",
+         "zricethezav/gitleaks:latest",
+         "git", "/repo", "--no-banner",
+         "--config", "/config.toml",
+         "--report-format", "json",
+         "--report-path", f"/reports/{name}.json"],
+        capture_output=True,
+    )
     report = os.path.join(reports_dir, f"{name}.json")
     if not os.path.exists(report):
-        print("   ⚠️  no report produced (scan failed?)")
+        print("   warning: gitleaks wrote no report (check docker / config)")
         return 0
     with open(report, encoding="utf-8") as fh:
         return len(json.load(fh))

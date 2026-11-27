@@ -49,6 +49,26 @@ Lines starting with `#` are skipped. For `KEY=value` lines, only the value is sc
 - Credentials embedded in URLs (`scheme://user:pass@host`) are not parsed yet.
 - Path rules lower findings in test folders but never drop them: real keys are sometimes copied into tests.
 
+## org_recon.py: scan a whole org
+
+Lists an org's repos, clones full history, scans each one with gitleaks,
+then prints a summary sorted by number of findings.
+
+Needs: `gh` (logged in), Docker.
+
+```bash
+python3 org_recon.py ORG --limit 50
+python3 org_recon.py ORG --limit 500 --suffix=-sdk          # only repos ending in -sdk
+python3 org_recon.py ORG --include-archived --skip big-repo  # archived too, skip one
+python3 triage.py --gitleaks /workspaces/recon/ORG/reports/REPO.json
+```
+
+- **Resume:** a repo that already has a report is skipped, so you can re-run after an interruption.
+- **Safe clone:** clones go to `NAME.partial` and are renamed when complete.
+- **Noise filters:** `gitleaks-recon.toml` keeps the default rules and drops known false
+  positives (vendored builds, lockfiles, media, KiCad DigiKey part names, JS `metaKey`).
+- Clones and reports live in `/workspaces/recon` (outside the repo). Never commit them.
+
 ## Ethics
 
 Built for authorized security testing and bug bounty programs only.
