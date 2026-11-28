@@ -117,6 +117,7 @@ def main():
     parser.add_argument("--skip", default="", help="comma-separated repo names to skip")
     parser.add_argument("--actions", action="store_true", help="also audit GitHub Actions workflows")
     parser.add_argument("--osv", action="store_true", help="also scan dependencies for known CVEs")
+    parser.add_argument("--only", default="", help="comma-separated repo names: scan only these")
     args = parser.parse_args()
 
     repos_dir = os.path.join(args.workdir, args.org, "repos")
@@ -125,8 +126,14 @@ def main():
     os.makedirs(reports_dir, exist_ok=True)
 
     skip = set(args.skip.split(",")) if args.skip else set()
+    only = set(args.only.split(",")) if args.only else None
     repos = [r for r in list_repos(args.org, args.limit, args.include_archived)
-             if r["name"].endswith(args.suffix) and r["name"] not in skip]
+            if r["name"].endswith(args.suffix) and r["name"] not in skip
+            and (only is None or r["name"] in only)]
+    if only:
+        missing = only - {r["name"] for r in repos}
+        if missing:
+            print(f"!! not found (archived? typo?): {', '.join(sorted(missing))}")
     note = "incl. archived" if args.include_archived else "no archived"
     print(f"{len(repos)} repos in {args.org} (no forks, {note}, suffix '{args.suffix}', skipped {len(skip)})\n")
     actions_total = 0
